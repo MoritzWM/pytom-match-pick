@@ -3,7 +3,6 @@ from itertools import pairwise
 
 import numpy as np
 import numpy.typing as npt
-
 from scipy import ndimage
 
 from pytom_tm.dataclass import CtfData, TiltSeriesMetaData

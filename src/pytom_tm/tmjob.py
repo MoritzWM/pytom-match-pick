@@ -17,7 +17,6 @@ from pytom_tm.angles import get_angle_list
 from pytom_tm.dataclass import CtfData, RelionTiltSeriesMetaData, TiltSeriesMetaData
 from pytom_tm.io import UnequalSpacingError, read_mrc, read_mrc_meta_data, write_mrc
 from pytom_tm.json import CustomJSONDecoder, CustomJSONEncoder
-
 from pytom_tm.weights import (
     create_gaussian_band_pass,
     create_wedge,
