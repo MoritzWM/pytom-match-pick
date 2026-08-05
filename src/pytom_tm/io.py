@@ -12,6 +12,8 @@ from lxml import etree
 
 from pytom_tm.dataclass import CtfData, RelionTiltSeriesMetaData, WarpTiltSeriesMetaData
 
+logger = logging.getLogger(__name__)
+
 
 class MultiColumnAngleFileError(ValueError):
     pass
@@ -288,17 +290,17 @@ def _wrap_mrcfile_readers(func, *args, **kwargs):
         mrc = func(*args, **kwargs)
     except ValueError as err:
         # see if permissive can safe this
-        logging.debug(f"mrcfile raised the following error: {err}, will try to recover")
+        logger.debug(f"mrcfile raised the following error: {err}, will try to recover")
         kwargs["permissive"] = True
         mrc = func(*args, **kwargs)
         if mrc.data is not None:
-            logging.warning(
+            logger.warning(
                 f"Loading {args[0]} in strict mode gave an error. "
                 "However, loading with 'permissive=True' did generate data, make sure "
                 "this is correct!"
             )
         else:
-            logging.debug("Could not reasonably recover")
+            logger.debug("Could not reasonably recover")
             raise ValueError(
                 f"{args[0]} header or data is too corrupt to recover, please fix the "
                 "header or data"
@@ -343,7 +345,7 @@ def read_mrc_meta_data(file_name: pathlib.Path) -> dict:
             if not all(
                 mrc.voxel_size.x == s for s in attrgetter("y", "z")(mrc.voxel_size)
             ):
-                logging.warning(
+                logger.warning(
                     "Voxel size annotation in MRC is slightly different between "
                     f"dimensions, namely {mrc.voxel_size}. It might be a tiny "
                     "numerical inaccuracy, but please ensure this is not problematic."
@@ -380,7 +382,7 @@ def write_mrc(
     -------
     """
     if data.dtype not in [np.float32, np.float16]:
-        logging.warning(
+        logger.warning(
             "data for mrc writing is not np.float32 or np.float16, will convert to "
             "np.float32"
         )
@@ -445,7 +447,7 @@ def read_txt_file(
                         f"{len(line.strip().split())} columns"
                     )
                 else:
-                    logging.warning(
+                    logger.warning(
                         f"Found more than one column in file {file_name}, "
                         "only returning values from the first column"
                     )
@@ -652,7 +654,7 @@ def parse_relion5_star_data(
 def parse_warp_xml_data(
     warp_xml_path: pathlib.Path,
     tomogram_path: pathlib.Path,
-    phase_flip_correction: bool = False,
+    phase_flip_correction: bool = True,
 ) -> tuple[float, WarpTiltSeriesMetaData]:
     """Read WarpTools metadata from a project directory.
 
@@ -662,21 +664,34 @@ def parse_warp_xml_data(
         path to the warp XML file containing metadata
     tomogram_path: pathlib.Path
         path to the tomogram for template matching
-    phase_flip_correction: bool, default False
-        whether phase flip correction was applied
+    phase_flip_correction: bool, default True
+        whether phase flip correction was applied; defaults to True because
+        tomograms reconstructed with WarpTools are always CTF-corrected
 
     Returns
     -------
     voxel_size: float
         tomogram voxel size
     ts_metadata: WarpTiltSeriesMetaData
-        associated tilt series metadata
+        associated tilt series metadata, with defocus_handedness set to -1 (or 1
+        if the XML's AreAnglesInverted flag is set)
     """
     # First determine the tomogram_voxel_size from the tomogram_path
     tomogram_meta = read_mrc_meta_data(tomogram_path)
     tomogram_voxel_size = tomogram_meta["voxel_size"]
 
     tree = etree.parse(warp_xml_path)
+
+    # WarpTools sample-leveling is needed for modelling the wedge
+    # - level_angle_y needs to be negated akin to the tilt angles
+    # - level_angle_x is used as is (validated against warpylib)
+    level_angle_x = float(tree.getroot().get("LevelAngleX", 0.0))
+    level_angle_y = -float(tree.getroot().get("LevelAngleY", 0.0))
+
+    # Defocus handedness in WarpTools is set by the AreAnglesInverted flag. We
+    # empirically checked what setting corresponds with pytom-match-pick conventions.
+    are_angles_inverted = tree.getroot().get("AreAnglesInverted", "False") == "True"
+    defocus_handedness = 1 if are_angles_inverted else -1
 
     tilt_angle_nodes = tree.findall(".//Angles")
     tilt_defocus_nodes = tree.findall(".//GridCTF/Node")
@@ -726,6 +741,9 @@ def parse_warp_xml_data(
         tilt_angles=flattened_tilt_angles,
         ctf_data=ctf_data,
         dose_accumulation=flattened_tilt_dose,
+        level_angle_x=level_angle_x,
+        level_angle_y=level_angle_y,
+        defocus_handedness=defocus_handedness,
     )
 
     return tomogram_voxel_size, ts_metadata
