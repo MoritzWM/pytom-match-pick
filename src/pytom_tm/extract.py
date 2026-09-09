@@ -1,6 +1,7 @@
 import logging
 import math
 import pathlib
+import re
 
 import numpy as np
 import numpy.typing as npt
@@ -12,7 +13,7 @@ from scipy.special import erfcinv
 from tqdm import tqdm
 
 from pytom_tm.angles import convert_euler, get_angle_list
-from pytom_tm.dataclass import RelionTiltSeriesMetaData
+from pytom_tm.dataclass import RelionTiltSeriesMetaData, WarpTiltSeriesMetaData
 from pytom_tm.io import read_mrc
 from pytom_tm.mask import spherical_mask
 from pytom_tm.tmjob import TMJob
@@ -331,8 +332,12 @@ def extract_particles(
 
     # remove relion5 reconstructed tomogram name as it messes with linking the tilt
     # series id when extracting subtomos
+    warp_match = re.match(r"(.*)(_\d+\.\d+Apx\.mrc)", tomogram_id)
     if relion5_compat and tomogram_id.startswith("rec_"):
         tomogram_id = tomogram_id[4:]
+    # replace Warp suffix with .tomostar for compatibility with WarpTools
+    elif isinstance(job.ts_metadata, WarpTiltSeriesMetaData) and warp_match is not None:
+        tomogram_id = warp_match.groups()[0] + ".tomostar"
 
     data = []
     scores = []
